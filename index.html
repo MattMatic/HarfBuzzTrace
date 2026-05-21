@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HarfBuzz Trace</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>HarfBuzz Trace</h1>
+      <span id="hb-version" class="version-badge"></span>
+    </header>
+
+    <section id="font-drop-zone" class="drop-zone" role="button" tabindex="0" aria-label="Drop TTF font file here">
+      <span class="drop-label">drop TTF font here</span>
+      <span id="font-name" class="font-name"></span>
+      <span id="font-meta" class="font-meta"></span>
+      <input type="file" id="font-file-input" accept=".ttf,.otf" hidden>
+    </section>
+
+    <section id="controls" class="controls-row">
+      <div class="control-group">
+        <label for="word-input">Word</label>
+        <input type="text" id="word-input" placeholder="type word…" autocomplete="off" spellcheck="false">
+        <button id="shape-btn" title="Shape (Enter)">Shape</button>
+      </div>
+      <div class="control-group">
+        <label for="script-input">Script</label>
+        <input type="text" id="script-input" value="" size="6" placeholder="auto" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="control-group">
+        <label for="lang-input">Language</label>
+        <input type="text" id="lang-input" value="" size="6" placeholder="auto" autocomplete="off" spellcheck="false">
+      </div>
+      <div class="control-group">
+        <label>Direction</label>
+        <div class="radio-group" id="direction-group">
+          <label class="radio-label"><input type="radio" name="direction" value="auto" checked> Auto</label>
+          <label class="radio-label"><input type="radio" name="direction" value="ltr"> LTR</label>
+          <label class="radio-label"><input type="radio" name="direction" value="rtl"> RTL</label>
+        </div>
+      </div>
+      <div class="control-group">
+        <label for="table-filter">Tables</label>
+        <select id="table-filter">
+          <option value="both">GSUB + GPOS</option>
+          <option value="GSUB">GSUB only</option>
+          <option value="GPOS">GPOS only</option>
+        </select>
+      </div>
+    </section>
+
+    <section id="codepoints-row" class="codepoints-row" hidden>
+      <span class="codepoints-label">U+</span>
+      <span id="codepoints-list"></span>
+    </section>
+
+    <section id="output-area">
+      <div id="trace-container">
+        <div id="trace-empty" class="trace-empty">no trace — load a font and type a word</div>
+        <div id="trace-list" class="trace-list" hidden></div>
+      </div>
+
+      <div id="hover-grid" class="hover-grid" hidden>
+        <table id="hover-table" class="hg-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>glyph</th>
+              <th class="hg-name">name</th>
+              <th>cl</th>
+              <th>ax</th>
+              <th>ay</th>
+              <th>dx</th>
+              <th>dy</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script type="module" src="js/main.mjs"></script>
+</body>
+</html>

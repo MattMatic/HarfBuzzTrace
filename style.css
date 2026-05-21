@@ -1,0 +1,496 @@
+/* ── Reset & base ────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:        #f4f4f0;
+  --surface:   #fafaf7;
+  --border:    #d8d8d2;
+  --border-hi: #aaaaaa;
+  --text:      #1a1a1a;
+  --text-dim:  #888880;
+  --text-dimmer: #bbbbbb;
+  --accent:    #2a5caa;
+  --accent-lo: #e8eef8;
+  --green:     #2a7a3a;
+  --green-lo:  #edf7ef;
+  --amber:     #8a5a00;
+  --amber-lo:  #fdf4e0;
+  --red:       #9a2020;
+  --red-lo:    #faeaea;
+  --mono:      'Fira Mono', 'Cascadia Code', 'Consolas', 'Menlo', monospace;
+  --sans:      system-ui, -apple-system, sans-serif;
+  --radius:    4px;
+}
+
+html { font-size: 14px; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--sans);
+  min-height: 100vh;
+  padding: 16px;
+}
+
+/* ── Layout ──────────────────────────────────────────────────── */
+#app {
+  max-width: 960px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+header h1 {
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+.version-badge {
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  color: var(--text-dim);
+  background: var(--border);
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+/* ── Drop zone ───────────────────────────────────────────────── */
+.drop-zone {
+  background: var(--surface);
+  border: 1.5px dashed var(--border-hi);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: border-color 0.15s, background 0.15s;
+  min-height: 50px;
+  user-select: none;
+}
+
+.drop-zone:hover,
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: var(--accent-lo);
+}
+
+.drop-zone.loaded {
+  border-style: solid;
+  border-color: var(--border);
+}
+
+.drop-label {
+  font-family: var(--mono);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.drop-zone.loaded .drop-label { display: none; }
+
+.font-name {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.font-meta {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  margin-left: 2px;
+}
+
+/* ── Controls ────────────────────────────────────────────────── */
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 20px;
+  align-items: flex-end;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.control-group label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+
+.control-group input,
+.control-group select {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 5px 8px;
+  font-family: var(--mono);
+  font-size: 0.9rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.12s;
+}
+
+.control-group input:focus,
+.control-group select:focus {
+  border-color: var(--accent);
+}
+
+#word-input { min-width: 200px; }
+
+.radio-group {
+  display: flex;
+  gap: 2px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 2px;
+}
+
+.radio-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  padding: 3px 8px;
+  border-radius: calc(var(--radius) - 1px);
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s, color 0.1s;
+}
+
+.radio-label:has(input:checked) {
+  background: var(--accent);
+  color: #fff;
+}
+
+.radio-label input[type="radio"] {
+  display: none;
+}
+
+button#shape-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  padding: 6px 14px;
+  font-family: var(--sans);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  align-self: flex-end;
+  transition: opacity 0.12s;
+}
+
+button#shape-btn:hover { opacity: 0.85; }
+button#shape-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Codepoints ──────────────────────────────────────────────── */
+.codepoints-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0 2px;
+  flex-wrap: wrap;
+}
+
+.codepoints-label {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+}
+
+.cp-chip {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  color: var(--text);
+  title: attr(data-char);
+}
+
+/* ── Output area ─────────────────────────────────────────────── */
+#output-area {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: start;
+}
+
+/* ── Trace list ──────────────────────────────────────────────── */
+#trace-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 120px;
+}
+
+.trace-empty {
+  padding: 24px 20px;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  color: var(--text-dimmer);
+}
+
+.trace-list {
+  padding: 6px 0;
+}
+
+/* ── Lookup group header ─────────────────────────────────────── */
+.lookup-group {
+  margin: 0;
+}
+
+.lookup-header {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  padding: 5px 12px 2px;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--text-dim);
+  border-top: 1px solid transparent;
+}
+
+.lookup-group + .lookup-group .lookup-header {
+  border-top-color: var(--border);
+}
+
+.lookup-table-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.badge-gsub {
+  background: var(--green-lo);
+  color: var(--green);
+}
+
+.badge-gpos {
+  background: var(--amber-lo);
+  color: var(--amber);
+}
+
+/* Breadcrumb crumb: groups lookup id + feature + optional debug name */
+.lookup-crumb {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.lookup-crumb-dim {
+  opacity: 0.5;
+}
+
+.crumb-sep {
+  color: var(--text-dimmer);
+  font-size: 0.72rem;
+  margin: 0 1px;
+  flex-shrink: 0;
+}
+
+.lookup-id {
+  color: var(--text-dimmer);
+}
+
+.lookup-feature {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.lookup-debug-name {
+  font-family: var(--mono);
+  font-size: 0.76rem;
+  color: var(--text);
+  background: var(--border);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-weight: 500;
+}
+
+/* ── Trace entry row ─────────────────────────────────────────── */
+.trace-entry {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 3px 12px 3px 24px;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  cursor: default;
+  border-radius: 2px;
+  transition: background 0.08s;
+  line-height: 1.5;
+}
+
+.trace-entry:hover {
+  background: var(--accent-lo);
+}
+
+.trace-entry.active-hover {
+  background: var(--accent-lo);
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Action badge */
+.action-badge {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.action-ligate  { background: var(--green-lo);  color: var(--green); }
+.action-replace { background: var(--green-lo);  color: var(--green); }
+.action-kern    { background: var(--amber-lo);  color: var(--amber); }
+.action-position{ background: var(--amber-lo);  color: var(--amber); }
+.action-attach  { background: var(--amber-lo);  color: var(--amber); }
+.action-multiply{ background: var(--accent-lo); color: var(--accent); }
+.action-delete  { background: var(--red-lo);    color: var(--red); }
+.action-generic { background: var(--border);    color: var(--text-dim); }
+
+/* Glyph delta info */
+.entry-body {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  flex: 1;
+}
+
+.glyph-token {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.glyph-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.glyph-deltas {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.delta-nonzero {
+  color: var(--amber);
+  font-weight: 600;
+}
+
+.delta-zero-all {
+  color: var(--text-dimmer);
+}
+
+/* GSUB arrow */
+.gsub-arrow {
+  color: var(--text-dimmer);
+  margin: 0 2px;
+}
+
+.gsub-before { color: var(--text-dim); }
+.gsub-after  { color: var(--green);    font-weight: 600; }
+
+/* ── Hover glyph grid ────────────────────────────────────────── */
+.hover-grid {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  position: sticky;
+  top: 12px;
+  max-width: 460px;
+}
+
+/* The <table> handles its own column sizing — no fixed widths needed */
+.hg-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.hg-table thead tr {
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+}
+
+.hg-table th {
+  padding: 4px 8px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.hg-table th.hg-name { text-align: left; }
+
+.hg-table td {
+  padding: 3px 8px;
+  text-align: right;
+  color: var(--text);
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+}
+
+/* name column (index 2 = 3rd td) */
+.hg-table td:nth-child(3) {
+  text-align: left;
+  color: var(--text-dim);
+  max-width: 9em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hg-table tbody tr:last-child td { border-bottom: none; }
+.hg-table tbody tr.hg-changed     { background: var(--amber-lo); }
+
+.hg-table td.changed { color: var(--amber); font-weight: 600; }
+.hg-table td.zero    { color: var(--text-dimmer); }
+
+/* ── Error / status bar ──────────────────────────────────────── */
+#status-bar {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+  color: var(--red);
+  padding: 4px 0;
+  min-height: 1.4em;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────── */
+#trace-container { max-height: 70vh; overflow-y: auto; }
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
