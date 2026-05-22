@@ -58,7 +58,7 @@
  *   }
  */
 
-import { glyphName, lookupDebugName } from './hb-loader.mjs';
+import { glyphName, lookupDebugInfo } from './hb-loader.mjs';
 
 // ── Regex catalogue ───────────────────────────────────────────────────────────
 
@@ -89,8 +89,8 @@ const RE = {
   triedKerning:  /^tried kerning glyphs? at ([\d,]+)/,
   positioning:   /^positioning glyphs? at ([\d,]+)/,
   positioned:    /^positioned glyphs? at ([\d,]+)/,
-  attaching:     /^(?:cursive )?attaching glyph at (\d+) to glyph at (\d+)/,
-  attached:      /^(?:cursive )?attached glyph at (\d+) to glyph at (\d+)/,
+  attaching:     /^(?:cursive )?attaching (?:mark )?glyph at (\d+) to glyph at (\d+)/,
+  attached:      /^(?:cursive )?attached (?:mark )?glyph at (\d+) to glyph at (\d+)/,
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -150,15 +150,17 @@ export function parseTrace(rawTrace, filter = 'both') {
   }
 
   function pushGroup(table, feature, lookupId) {
-    const debugName = table ? lookupDebugName(table, lookupId) : null;
+    const dbg = table ? lookupDebugInfo(table, lookupId) : null;
+    const debugName     = dbg?.name     ?? null;
+    const debugLocation = dbg?.location ?? null;
     // Capture the current call path (ancestor lookups, outermost first).
-    // We snapshot now because the stack grows/shrinks as we parse.
     const ancestorPath = stack.map(s => ({
-      lookupId: s.lookupId,
-      feature:  s.group.feature,
-      debugName: s.group.debugName,
+      lookupId:      s.lookupId,
+      feature:       s.group.feature,
+      debugName:     s.group.debugName,
+      debugLocation: s.group.debugLocation,
     }));
-    const group = { table, feature, lookupId, debugName, ancestorPath, rows: [] };
+    const group = { table, feature, lookupId, debugName, debugLocation, ancestorPath, rows: [] };
     stack.push({ table, feature, lookupId, group });
     return group;
   }
@@ -404,6 +406,37 @@ export function parseTrace(rawTrace, filter = 'both') {
 
   // Flush any remaining open groups
   clearStack();
+
+  // ── Synthetic FINAL group ─────────────────────────────────────────────────
+  // Find the last rawTrace entry that has a non-empty t array.
+  // This is the complete post-processed glyph buffer — the true HarfBuzz output.
+  let finalT = null;
+  let finalIdx = -1;
+  for (let i = rawTrace.length - 1; i >= 0; i--) {
+    if (rawTrace[i].t && rawTrace[i].t.length > 0) {
+      finalT   = rawTrace[i].t;
+      finalIdx = i;
+      break;
+    }
+  }
+  if (finalT) {
+    const snap = finalT.map(g => ({ ...g }));
+    groups.push({
+      table:         'FINAL',
+      feature:       '',
+      lookupId:      null,
+      debugName:     null,
+      debugLocation: null,
+      ancestorPath:  [],
+      rows: [{
+        action:   'final',
+        traceIdx: finalIdx,
+        glyphs:   [],
+        before:   snap,
+        after:    snap,
+      }],
+    });
+  }
 
   return groups;
 }

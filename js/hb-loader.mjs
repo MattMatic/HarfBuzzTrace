@@ -45,16 +45,25 @@ function loadScript(url) {
 let currentFont = null;
 
 /**
- * Debg lookup name index.
- * { GSUB: { "0": "name", ... }, GPOS: { "0": "name", ... } }
+ * Debg lookup index.
+ * { GSUB: { "0": { name, location }, ... }, GPOS: { ... } }
+ * location is the feaLib source reference stripped to "filename:line:col",
+ * or null if absent.
  */
 let debgNames = { GSUB: {}, GPOS: {} };
 
 /**
- * Parse the Debg table from a loaded face.
- * Raw UTF-8 JSON; feaLib block:
- *   data["com.github.fonttools.feaLib"][table][lookupIndex] = [location, name, features]
+ * Strip a feaLib source location to "filename:line:col".
+ * Input examples: "<features>:3:5"  "/path/to/font.fea:12:1"
+ * Output:         "<features>:3:5"  "font.fea:12:1"
  */
+function stripLocation(loc) {
+  if (!loc || typeof loc !== 'string') return null;
+  // Split on '/' or '\', take the last component (which includes :line:col)
+  const last = loc.split(/[/\\]/).pop();
+  return last || null;
+}
+
 function parseDebgTable(face) {
   debgNames = { GSUB: {}, GPOS: {} };
   try {
@@ -68,7 +77,10 @@ function parseDebgTable(face) {
       if (!entries) continue;
       for (const [idxStr, value] of Object.entries(entries)) {
         if (Array.isArray(value) && typeof value[1] === 'string') {
-          debgNames[table][idxStr] = value[1];
+          debgNames[table][idxStr] = {
+            name:     value[1],
+            location: stripLocation(value[0]),
+          };
         }
       }
     }
@@ -77,8 +89,14 @@ function parseDebgTable(face) {
   }
 }
 
-export function lookupDebugName(table, lookupId) {
+/** Returns { name, location } or null. */
+export function lookupDebugInfo(table, lookupId) {
   return debgNames[table]?.[String(lookupId)] ?? null;
+}
+
+/** Convenience — name string only, or null. */
+export function lookupDebugName(table, lookupId) {
+  return debgNames[table]?.[String(lookupId)]?.name ?? null;
 }
 
 /**
@@ -141,6 +159,10 @@ export function loadFont(arrayBuffer) {
     currentFont = null;
   }
 
+  // Clear both caches — new font means new outlines and new advances
+  glyphPathCache.clear();
+  glyphAdvanceCache.clear();
+
   const fontData = new Uint8Array(arrayBuffer);
   const blob = hb.createBlob(fontData);
   const face = hb.createFace(blob, 0);
@@ -148,10 +170,110 @@ export function loadFont(arrayBuffer) {
   font.setScale(1000, 1000);
 
   parseDebgTable(face);
+  buildAdvanceCache(face);
   const { fullName, version } = parseFontNames(face);
+  const metrics = parseFontMetrics(face);
 
   currentFont = { blob, face, font };
-  return { ...currentFont, fullName, version };
+  return { ...currentFont, fullName, version, metrics };
+}
+
+// ── Font metrics ──────────────────────────────────────────────────────────────
+
+/**
+ * Read unitsPerEm (head table) and typo ascender/descender (OS/2 table).
+ * Used to compute SVG viewport and Y-flip transform.
+ */
+function parseFontMetrics(face) {
+  let unitsPerEm = 1000, ascender = 800, descender = -200;
+  try {
+    const head = face.reference_table('head');
+    if (head && head.length >= 20) {
+      const v = new DataView(head.buffer, head.byteOffset);
+      unitsPerEm = v.getUint16(18);
+    }
+  } catch (_) {}
+  try {
+    const os2 = face.reference_table('OS/2');
+    if (os2 && os2.length >= 72) {
+      const v = new DataView(os2.buffer, os2.byteOffset);
+      ascender  =  v.getInt16(68);
+      descender =  v.getInt16(70);
+    }
+  } catch (_) {}
+  return { unitsPerEm, ascender, descender };
+}
+
+export function getFontMetrics() {
+  return currentFont ? parseFontMetrics(currentFont.face) : null;
+}
+
+// ── Glyph advance cache (from hmtx) ──────────────────────────────────────────
+//
+// Used during GSUB-phase SVG rendering when HarfBuzz ax=0 (not yet positioned).
+// Cleared and rebuilt on every font load.
+
+const glyphAdvanceCache = new Map();   // gid -> advance width in design units
+
+function buildAdvanceCache(face) {
+  glyphAdvanceCache.clear();
+  try {
+    const hhea = face.reference_table('hhea');
+    if (!hhea || hhea.length < 36) return;
+    const numberOfHMetrics = new DataView(hhea.buffer, hhea.byteOffset).getUint16(34);
+
+    const hmtx = face.reference_table('hmtx');
+    if (!hmtx) return;
+    const hmtxView = new DataView(hmtx.buffer, hmtx.byteOffset);
+
+    // Determine total glyph count from maxp
+    let numGlyphs = numberOfHMetrics;
+    try {
+      const maxp = face.reference_table('maxp');
+      if (maxp && maxp.length >= 6) numGlyphs = new DataView(maxp.buffer, maxp.byteOffset).getUint16(4);
+    } catch (_) {}
+
+    // Last longHorMetric advance (used for mono-tail glyphs)
+    const lastAdv = hmtxView.getUint16((numberOfHMetrics - 1) * 4);
+
+    for (let gid = 0; gid < numGlyphs; gid++) {
+      glyphAdvanceCache.set(gid,
+        gid < numberOfHMetrics
+          ? hmtxView.getUint16(gid * 4)
+          : lastAdv
+      );
+    }
+  } catch (_) {
+    // Absent or malformed hmtx — advance cache stays empty
+  }
+}
+
+/** Glyph advance from hmtx, or 0 if unavailable. */
+export function getGlyphAdvance(gid) {
+  return glyphAdvanceCache.get(gid) ?? 0;
+}
+
+// ── Glyph path cache ──────────────────────────────────────────────────────────
+// Pre-cached per shaping call; survives across words; cleared on font load.
+// Key: glyph ID (number). Value: SVG path d-string from glyphToPath.
+
+const glyphPathCache = new Map();
+
+/**
+ * Ensure all glyph IDs in `gids` are cached, then return the cache.
+ * Call this once after shaping; hover rendering reads from it directly.
+ */
+export function precacheGlyphPaths(gids) {
+  if (!currentFont) return;
+  for (const gid of gids) {
+    if (!glyphPathCache.has(gid)) {
+      glyphPathCache.set(gid, currentFont.font.glyphToPath(gid) || '');
+    }
+  }
+}
+
+export function getGlyphPath(gid) {
+  return glyphPathCache.get(gid) ?? '';
 }
 
 // ── Shaping ───────────────────────────────────────────────────────────────────

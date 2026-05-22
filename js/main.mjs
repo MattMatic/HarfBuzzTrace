@@ -3,9 +3,9 @@
  * Entry point. Wires together UI events, font loading, shaping, and rendering.
  */
 
-import { initHarfBuzz, loadFont, shapeWithTrace, isLoaded } from './hb-loader.mjs';
+import { initHarfBuzz, loadFont, shapeWithTrace, isLoaded, precacheGlyphPaths } from './hb-loader.mjs';
 import { parseTrace }  from './trace-parser.mjs';
-import { initRenderer, renderTrace, renderCodepoints, showStatus, clearStatus, showEmpty } from './renderer.mjs';
+import { initRenderer, renderTrace, renderCodepoints, showStatus, clearStatus, showEmpty, setFontMetrics } from './renderer.mjs';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const dropZone     = document.getElementById('font-drop-zone');
@@ -73,11 +73,12 @@ async function handleFontFile(file) {
   try {
     clearStatus();
     const buf = await file.arrayBuffer();
-    const { fullName, version } = loadFont(buf);
+    const { fullName, version, metrics } = loadFont(buf);
 
     fontNameEl.textContent = file.name;
     fontMetaEl.textContent = [fullName, version].filter(Boolean).join(' · ');
     fontMetaEl.hidden = !fullName && !version;
+    setFontMetrics(metrics);
     dropZone.classList.add('loaded');
     shapeBtn.disabled = false;
     showStatus(`Loaded: ${file.name}`);
@@ -134,8 +135,20 @@ function runShape(word) {
 
   try {
     const rawTrace = shapeWithTrace(word, scriptInput.value, langInput.value, getDirection());
-    const filter   = tableFilter.value;  // 'both' | 'GSUB' | 'GPOS'
+    const filter   = tableFilter.value;
     const groups   = parseTrace(rawTrace, filter);
+
+    // Collect all unique glyph IDs across all groups for pre-caching
+    const gids = new Set();
+    for (const group of groups) {
+      for (const row of group.rows) {
+        for (const buf of [row.before, row.after]) {
+          if (buf) buf.forEach(g => g?.g != null && gids.add(g.g));
+        }
+      }
+    }
+    precacheGlyphPaths(gids);
+
     renderTrace(groups);
 
     const total = groups.reduce((s, g) => s + g.rows.length, 0);

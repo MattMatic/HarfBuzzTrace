@@ -236,6 +236,15 @@ button#shape-btn:disabled { opacity: 0.4; cursor: default; }
   align-items: start;
 }
 
+/* Right column: hover grid stacked above SVG panel */
+.right-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  top: 12px;
+}
+
 /* ── Trace list ──────────────────────────────────────────────── */
 #trace-container {
   background: var(--surface);
@@ -425,8 +434,6 @@ button#shape-btn:disabled { opacity: 0.4; cursor: default; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   overflow: hidden;
-  position: sticky;
-  top: 12px;
   max-width: 460px;
 }
 
@@ -494,3 +501,61 @@ button#shape-btn:disabled { opacity: 0.4; cursor: default; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* ── Trace step index ────────────────────────────────────────── */
+.trace-step-idx {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dimmer);
+  min-width: 3em;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.lookup-trace-idx {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-dimmer);
+  min-width: 3em;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── Final output row ────────────────────────────────────────── */
+.lookup-group-final {
+  border-top: 2px solid var(--border);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+
+.lookup-final-label {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+}
+
+.action-final {
+  background: var(--surface);
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.trace-entry-final {
+  border-radius: var(--radius);
+}
+
+/* ── SVG panel ───────────────────────────────────────────────── */
+.svg-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px;
+  overflow: hidden;
+  max-width: 460px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -1,29 +1,37 @@
 /**
  * renderer.mjs
- * Builds the trace list DOM from parsed LookupGroup[] data.
- * Also manages the hover glyph grid panel.
+ * Builds trace list DOM, hover glyph grid, and SVG glyph preview.
  */
 
-import { glyphName } from './hb-loader.mjs';
+import { glyphName, getGlyphPath, getGlyphAdvance } from './hb-loader.mjs';
 
 // ── Element cache ─────────────────────────────────────────────────────────────
-let traceList    = null;
-let traceEmpty   = null;
-let hoverGrid    = null;
-let hoverTable   = null;   // <table> element inside hover panel
+let traceList  = null;
+let traceEmpty = null;
+let hoverGrid  = null;
+let hoverTable = null;
+let svgPanel   = null;
+
+/** Font metrics set once on font load. */
+let fontMetrics = { unitsPerEm: 1000, ascender: 800, descender: -200 };
+
+export function setFontMetrics(m) {
+  if (m) fontMetrics = m;
+}
 
 export function initRenderer() {
   traceList  = document.getElementById('trace-list');
   traceEmpty = document.getElementById('trace-empty');
   hoverGrid  = document.getElementById('hover-grid');
   hoverTable = document.getElementById('hover-table');
+  svgPanel   = document.getElementById('svg-panel');
 }
 
 // ── Main render entry point ───────────────────────────────────────────────────
 
 export function renderTrace(groups) {
   traceList.innerHTML = '';
-  hideHoverGrid();
+  hideRightPanel();
 
   if (!groups || groups.length === 0) {
     traceList.hidden = true;
@@ -38,6 +46,7 @@ export function renderTrace(groups) {
   for (const group of groups) {
     const groupEl = document.createElement('div');
     groupEl.className = 'lookup-group';
+    if (group.table === 'FINAL') groupEl.classList.add('lookup-group-final');
     groupEl.appendChild(buildLookupHeader(group));
 
     const isMultiRow = group.rows.length > 1;
@@ -49,19 +58,29 @@ export function renderTrace(groups) {
   }
 }
 
-// ── Lookup header breadcrumb ──────────────────────────────────────────────────
-//
-// Displays the full call stack for the lookup, most-recent (innermost) first.
-// Example for a recursive lookup:
-//
-//   [GPOS]  lookup 1 'kern' kern_pairs  ←  lookup 0 'kern'
-//
-// ancestorPath is outermost-first, so we reverse it to build outermost-last,
-// then prepend the current group itself.
+// ── Lookup header ─────────────────────────────────────────────────────────────
 
 function buildLookupHeader(group) {
   const header = document.createElement('div');
   header.className = 'lookup-header';
+
+  // FINAL row — simple label, no badge or crumb
+  if (group.table === 'FINAL') {
+    const lbl = document.createElement('span');
+    lbl.className = 'lookup-final-label';
+    lbl.textContent = 'final output';
+    header.appendChild(lbl);
+    return header;
+  }
+
+  // traceIdx of first fired row — shown far left, dim
+  const firstIdx = group.rows[0]?.traceIdx;
+  if (firstIdx != null) {
+    const idxEl = document.createElement('span');
+    idxEl.className   = 'lookup-trace-idx';
+    idxEl.textContent = firstIdx;
+    header.appendChild(idxEl);
+  }
 
   // Table badge
   const badge = document.createElement('span');
@@ -69,42 +88,44 @@ function buildLookupHeader(group) {
   badge.textContent = group.table;
   header.appendChild(badge);
 
-  // Build the breadcrumb: current lookup first, then ancestors right to left
-  // Current
-  header.appendChild(buildLookupCrumb(group.lookupId, group.feature, group.debugName, false));
+  // Breadcrumb: current lookup first, then ancestors innermost→outermost
+  header.appendChild(buildLookupCrumb(
+    group.lookupId, group.feature, group.debugName, group.debugLocation, false
+  ));
 
-  // Ancestors: ancestorPath is outermost-first; show innermost-first after current
-  // i.e. reverse so we go from "just above current" out to root
   const ancestors = [...(group.ancestorPath ?? [])].reverse();
   for (const anc of ancestors) {
     const sep = document.createElement('span');
-    sep.className = 'crumb-sep';
+    sep.className   = 'crumb-sep';
     sep.textContent = '←';
     header.appendChild(sep);
-    header.appendChild(buildLookupCrumb(anc.lookupId, anc.feature, anc.debugName, true));
+    header.appendChild(buildLookupCrumb(
+      anc.lookupId, anc.feature, anc.debugName, anc.debugLocation, true
+    ));
   }
 
   return header;
 }
 
-function buildLookupCrumb(lookupId, feature, debugName, dim) {
+function buildLookupCrumb(lookupId, feature, debugName, debugLocation, dim) {
   const crumb = document.createElement('span');
   crumb.className = 'lookup-crumb' + (dim ? ' lookup-crumb-dim' : '');
 
   const idSpan = document.createElement('span');
-  idSpan.className = 'lookup-id';
+  idSpan.className   = 'lookup-id';
   idSpan.textContent = `lookup ${lookupId}`;
 
   const featSpan = document.createElement('span');
-  featSpan.className = 'lookup-feature';
+  featSpan.className   = 'lookup-feature';
   featSpan.textContent = `'${feature}'`;
 
   crumb.append(idSpan, featSpan);
 
   if (debugName) {
     const dbgSpan = document.createElement('span');
-    dbgSpan.className = 'lookup-debug-name';
+    dbgSpan.className   = 'lookup-debug-name';
     dbgSpan.textContent = debugName;
+    if (debugLocation) dbgSpan.title = debugLocation;
     crumb.appendChild(dbgSpan);
   }
 
@@ -121,6 +142,7 @@ const ACTION_LABELS = {
   kern:     'KERN',
   position: 'POSITION',
   attach:   'ATTACH',
+  final:    'OUTPUT',
 };
 
 const ACTION_CLASS = {
@@ -131,16 +153,23 @@ const ACTION_CLASS = {
   kern:     'action-kern',
   position: 'action-position',
   attach:   'action-attach',
+  final:    'action-final',
 };
 
 function buildEntryRow(row, dimLabel) {
   const el = document.createElement('div');
   el.className = 'trace-entry';
+  if (row.action === 'final') el.classList.add('trace-entry-final');
+
+  // Trace step index — on each action row (not just header)
+  const idxEl = document.createElement('span');
+  idxEl.className   = 'trace-step-idx';
+  idxEl.textContent = row.traceIdx ?? '';
 
   const badge = document.createElement('span');
-  badge.className = `action-badge ${ACTION_CLASS[row.action] ?? 'action-generic'}`;
+  badge.className   = `action-badge ${ACTION_CLASS[row.action] ?? 'action-generic'}`;
   badge.textContent = ACTION_LABELS[row.action] ?? row.action.toUpperCase();
-  if (dimLabel) badge.style.opacity = '0.4';
+  if (dimLabel && row.action !== 'final') badge.style.opacity = '0.4';
 
   const body = document.createElement('span');
   body.className = 'entry-body';
@@ -148,15 +177,20 @@ function buildEntryRow(row, dimLabel) {
   if (row.action === 'ligate' || row.action === 'replace' ||
       row.action === 'multiply' || row.action === 'delete') {
     buildGsubBody(body, row);
+  } else if (row.action === 'final') {
+    body.textContent = `${row.after.length} glyph${row.after.length !== 1 ? 's' : ''}`;
+    body.style.color = 'var(--text-dim)';
   } else {
     buildGposBody(body, row);
   }
 
-  el.append(badge, body);
+  el.append(idxEl, badge, body);
 
   el.addEventListener('mouseenter', () => {
     el.classList.add('active-hover');
-    showHoverGrid(row.after || row.before || [], row.before || []);
+    // Derive which buffer indices are "active" (changed/involved) for highlight
+    const activeIndices = getActiveIndices(row);
+    showRightPanel(row.after || row.before || [], row.before || [], activeIndices);
   });
   el.addEventListener('mouseleave', () => {
     el.classList.remove('active-hover');
@@ -172,15 +206,15 @@ function buildGsubBody(container, row) {
   if (!g) return;
 
   const beforeSpan = document.createElement('span');
-  beforeSpan.className = 'gsub-before';
+  beforeSpan.className   = 'gsub-before';
   beforeSpan.textContent = g.before.map(b => `'${b.name}'`).join(', ');
 
   const arrow = document.createElement('span');
-  arrow.className = 'gsub-arrow';
+  arrow.className   = 'gsub-arrow';
   arrow.textContent = ' → ';
 
   const afterSpan = document.createElement('span');
-  afterSpan.className = 'gsub-after';
+  afterSpan.className   = 'gsub-after';
   afterSpan.textContent = g.after.map(a => `'${a.name}'`).join(', ');
 
   container.append(beforeSpan, arrow, afterSpan);
@@ -194,7 +228,7 @@ function buildGposBody(container, row) {
     token.className = 'glyph-token';
 
     const nameEl = document.createElement('span');
-    nameEl.className = 'glyph-name';
+    nameEl.className   = 'glyph-name';
     nameEl.textContent = `'${g.name}'`;
 
     const deltaEl = document.createElement('span');
@@ -211,7 +245,6 @@ function buildDeltaSpan(delta) {
   const fields = ['ax', 'ay', 'dx', 'dy'];
   const vals   = fields.map(f => delta?.[f] ?? 0);
 
-  // All zero → single centred bullet
   if (vals.every(v => v === 0)) {
     const s = document.createElement('span');
     s.className   = 'delta-zero-all';
@@ -220,7 +253,6 @@ function buildDeltaSpan(delta) {
     return frag;
   }
 
-  // Show only non-zero fields
   let first = true;
   fields.forEach((f, i) => {
     const val = vals[i];
@@ -236,17 +268,46 @@ function buildDeltaSpan(delta) {
   return frag;
 }
 
+// ── Active index derivation ───────────────────────────────────────────────────
+
+/**
+ * Returns a Set of buffer indices that were involved in / changed by this row.
+ * Used to highlight those glyphs in the hover grid and SVG.
+ */
+function getActiveIndices(row) {
+  const s = new Set();
+  if (row.action === 'final') return s;  // no highlight for final
+
+  if (row.action === 'ligate' || row.action === 'replace' ||
+      row.action === 'multiply' || row.action === 'delete') {
+    // GSUB: highlight the after-state glyph positions
+    const g = row.glyphs[0];
+    if (g) g.after.forEach(a => s.add(a.idx));
+  } else {
+    // GPOS: highlight glyphs by their buffer index
+    row.glyphs.forEach(g => s.add(g.idx));
+  }
+  return s;
+}
+
+// ── Right panel: hover grid + SVG preview ────────────────────────────────────
+
+function showRightPanel(afterBuffer, beforeBuffer, activeIndices) {
+  showHoverGrid(afterBuffer, beforeBuffer, activeIndices);
+  showSvgPreview(afterBuffer, activeIndices);
+}
+
+function hideRightPanel() {
+  hoverGrid.hidden = true;
+  svgPanel.hidden  = true;
+  const tbody = hoverTable?.querySelector('tbody');
+  if (tbody) tbody.innerHTML = '';
+  svgPanel.innerHTML = '';
+}
+
 // ── Hover glyph grid ──────────────────────────────────────────────────────────
-//
-// Uses a <table> so header and body columns are guaranteed to align.
-// Columns: #  glyph  name  cluster  ax  ay  dx  dy
 
-const HG_COLS = ['#', 'glyph', 'name', 'cl', 'ax', 'ay', 'dx', 'dy'];
-// Which column indices are right-aligned (numeric)
-const HG_RIGHT = new Set([0, 1, 3, 4, 5, 6, 7]);
-
-function showHoverGrid(afterBuffer, beforeBuffer) {
-  // Clear tbody
+function showHoverGrid(afterBuffer, beforeBuffer, activeIndices = new Set()) {
   const tbody = hoverTable.querySelector('tbody');
   tbody.innerHTML = '';
 
@@ -257,30 +318,18 @@ function showHoverGrid(afterBuffer, beforeBuffer) {
 
     const name = glyphName(a.g);
 
-    const changed = b && (
+    const changed = activeIndices.has(i) || (b && (
       a.g         !== b.g         ||
       (a.ax ?? 0) !== (b.ax ?? 0) ||
       (a.ay ?? 0) !== (b.ay ?? 0) ||
       (a.dx ?? 0) !== (b.dx ?? 0) ||
       (a.dy ?? 0) !== (b.dy ?? 0)
-    );
+    ));
 
     const tr = document.createElement('tr');
     if (changed) tr.classList.add('hg-changed');
 
-    // Values: #  glyph  name  cl  ax  ay  dx  dy
-    const vals = [
-      i,
-      a.g,
-      name,
-      a.cl  ?? 0,
-      a.ax  ?? 0,
-      a.ay  ?? 0,
-      a.dx  ?? 0,
-      a.dy  ?? 0,
-    ];
-
-    // Changed flags per cell
+    const vals = [i, a.g, name, a.cl ?? 0, a.ax ?? 0, a.ay ?? 0, a.dx ?? 0, a.dy ?? 0];
     const changedFlags = [
       false,
       b && a.g !== b.g,
@@ -306,10 +355,86 @@ function showHoverGrid(afterBuffer, beforeBuffer) {
   hoverGrid.hidden = false;
 }
 
-function hideHoverGrid() {
-  hoverGrid.hidden = true;
-  const tbody = hoverTable?.querySelector('tbody');
-  if (tbody) tbody.innerHTML = '';
+// ── SVG glyph preview ─────────────────────────────────────────────────────────
+//
+// Renders the shaped glyphs as outlines in a small SVG.
+// Coordinate system:
+//   - HarfBuzz / font: Y-up, origin at baseline-left
+//   - SVG: Y-down
+// Transform per glyph:
+//   translate(penX + dx,  ascender - dy)  scale(1, -1)
+// where penX accumulates ax advances.
+//
+// Highlighted glyphs (those whose buffer index appears in activeIndices)
+// are drawn in amber; others in a dim foreground colour.
+
+function showSvgPreview(glyphBuffer, activeIndices = new Set()) {
+  svgPanel.innerHTML = '';
+  if (!glyphBuffer || glyphBuffer.length === 0) {
+    svgPanel.hidden = true;
+    return;
+  }
+
+  const { ascender, descender } = fontMetrics;
+  const viewH = ascender - descender;
+
+  // Compute display advance per glyph:
+  // During GSUB phase ax=0 — fall back to hmtx advance so glyphs don't overlap.
+  const displayAx = glyphBuffer.map(g => {
+    const ax = g.ax ?? 0;
+    return ax !== 0 ? ax : getGlyphAdvance(g.g);
+  });
+
+  const totalAx = displayAx.reduce((s, a) => s + a, 0) || 1000;
+  const margin  = viewH * 0.05;
+  const viewW   = totalAx + margin * 2;
+  const svgH    = 120;
+  const svgW    = Math.round(svgH * viewW / viewH);
+
+  const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  svg.setAttribute('width',   svgW);
+  svg.setAttribute('height',  svgH);
+  svg.setAttribute('viewBox', `${-margin} ${-margin} ${viewW} ${viewH + margin * 2}`);
+  svg.style.display = 'block';
+
+  // Baseline
+  const baseline = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+  baseline.setAttribute('x1', 0);
+  baseline.setAttribute('y1', ascender);
+  baseline.setAttribute('x2', totalAx);
+  baseline.setAttribute('y2', ascender);
+  baseline.setAttribute('stroke', 'var(--border)');
+  baseline.setAttribute('stroke-width', '8');
+  svg.appendChild(baseline);
+
+  // Glyphs
+  let penX = 0;
+  for (let i = 0; i < glyphBuffer.length; i++) {
+    const g    = glyphBuffer[i];
+    const d    = getGlyphPath(g.g);
+    const dx   = g.dx ?? 0;
+    const dy   = g.dy ?? 0;
+
+    const tx = penX + dx;
+    const ty = ascender - dy;
+
+    if (d) {
+      const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+      path.setAttribute('d', d);
+      path.setAttribute('transform', `translate(${tx},${ty}) scale(1,-1)`);
+
+      const isActive = activeIndices.has(i);
+      path.setAttribute('fill',         isActive ? 'var(--amber)' : 'var(--text)');
+      path.setAttribute('fill-opacity', isActive ? '0.9'          : '0.25');
+      path.setAttribute('stroke', 'none');
+      svg.appendChild(path);
+    }
+
+    penX += displayAx[i];
+  }
+
+  svgPanel.appendChild(svg);
+  svgPanel.hidden = false;
 }
 
 // ── Codepoints ────────────────────────────────────────────────────────────────
