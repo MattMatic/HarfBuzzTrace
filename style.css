@@ -54,6 +54,18 @@ header h1 {
   color: var(--text);
 }
 
+.hb-select-label {
+  font-size: 0.77rem;
+  color: var(--text-dim);
+  margin-left: 6px;
+}
+
+#hb-version-select {
+  font-family: var(--mono);
+  font-size: 0.77rem;
+  max-width: 24em;
+}
+
 .version-badge {
   font-family: var(--mono);
   font-size: 0.77rem;

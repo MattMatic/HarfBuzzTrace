@@ -1,43 +1,213 @@
 /**
  * hb-loader.mjs
- * Loads HarfBuzzJS WASM (0.3.6) and wraps font/face/buffer lifecycle.
+ * Loads a selectable harfbuzzjs build (WASM) and wraps font/face/buffer lifecycle.
  * All HarfBuzz interaction is funnelled through this module.
+ *
+ * harfbuzzjs has three incompatible packaging/API generations, each handled
+ * by an adapter below:
+ *
+ *   legacy  0.3.x        hbjs.js + standalone hb.wasm. Tracing is a native WASM
+ *                        export (hbjs_shape_with_trace) - the only build that has it.
+ *   emcc    0.4.x-0.10.x hbjs.js + emscripten hb.js + hb.wasm. Tracing is done in JS
+ *                        through hb_buffer_set_message_func.
+ *   esm     1.x          ES-module package (dist/index.mjs), class based API.
+ *
+ * All three produce the same trace entry shape: { m, t, glyphs }.
  */
-
-const WASM_URL = 'https://cdn.jsdelivr.net/npm/harfbuzzjs@0.3.6/hb.wasm';
-const HBJS_URL = 'https://cdn.jsdelivr.net/npm/harfbuzzjs@0.3.6/hbjs.js';
-
-/** @type {object|null} hbjs wrapper instance */
-let hb = null;
 
 /**
- * Raw WASM exports — needed to call hbjs_shape_with_trace directly
- * with a larger buffer than hbjs.js hardcodes (1 MB).
- * @type {object|null}
+ * Selectable builds. `hb` is the HarfBuzz version the build reports at runtime
+ * (measured with hb_version_string()); 0.3.6 does not export that function.
+ * When several harfbuzzjs releases share one HarfBuzz version, the latest is listed.
  */
-let wasmExports = null;
+export const HB_VERSIONS = [
+  { id: '0.3.6',  hb: '~9.0 (not reported)' },
+  { id: '0.4.2',  hb: '10.0.0' },
+  { id: '0.4.3',  hb: '10.1.0' },
+  { id: '0.4.4',  hb: '10.2.0' },
+  { id: '0.4.5',  hb: '10.4.0' },
+  { id: '0.4.6',  hb: '11.0.0' },
+  { id: '0.4.7',  hb: '11.0.1' },
+  { id: '0.4.9',  hb: '11.4.1' },
+  { id: '0.4.10', hb: '11.4.4' },
+  { id: '0.4.11', hb: '11.4.5' },
+  { id: '0.4.12', hb: '11.5.0' },
+  { id: '0.4.13', hb: '12.0.0' },
+  { id: '0.4.14', hb: '12.2.0' },
+  { id: '0.4.15', hb: '12.3.0' },
+  { id: '0.10.0', hb: '12.3.2' },
+  { id: '0.10.2', hb: '13.2.1' },
+  { id: '0.10.3', hb: '14.0.0' },
+  { id: '1.2.0',  hb: '14.2.0' },
+  { id: '1.4.0',  hb: '14.2.1' },
+  { id: '1.6.0',  hb: '14.3.0' },
+  { id: '1.6.1',  hb: '14.4.0' },
+  { id: '1.6.2',  hb: '14.5.0' },
+  { id: '1.6.3',  hb: '14.6.0' },
+  { id: '1.6.4',  hb: '15.0.0' },
+];
 
-export async function initHarfBuzz() {
-  if (hb) return hb;
+/** Build used when none is requested (unchanged from previous releases). */
+export const DEFAULT_VERSION = '0.3.6';
 
-  if (typeof window.hbjs === 'undefined') {
-    await loadScript(HBJS_URL);
-  }
+/**
+ * Base URL of an npm CDN laid out like jsDelivr (`<base>/harfbuzzjs@<ver>/<file>`).
+ * Override with ?cdn=<url> to self-host or test offline.
+ */
+const CDN_BASE = (() => {
+  try {
+    const c = new URLSearchParams(location.search).get('cdn');
+    if (c) return c.replace(/\/+$/, '');
+  } catch (_) {}
+  return 'https://cdn.jsdelivr.net/npm';
+})();
 
-  const result = await WebAssembly.instantiateStreaming(fetch(WASM_URL));
-  hb = window.hbjs(result.instance);
-  wasmExports = result.instance.exports;
-  return hb;
+const pkgUrl = (ver, file) => `${CDN_BASE}/harfbuzzjs@${ver}/${file}`;
+
+/** 'legacy' | 'emcc' | 'esm' from a harfbuzzjs version string. */
+function engineKind(ver) {
+  const m = /^(\d+)\.(\d+)/.exec(ver);
+  if (!m) throw new Error(`Unrecognised harfbuzzjs version "${ver}"`);
+  const major = +m[1], minor = +m[2];
+  if (major >= 1) return 'esm';
+  return minor <= 3 ? 'legacy' : 'emcc';
 }
 
-function loadScript(url) {
-  return new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = url;
-    s.onload = resolve;
-    s.onerror = () => reject(new Error(`Failed to load ${url}`));
-    document.head.appendChild(s);
+async function fetchChecked(url, as) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`HTTP ${r.status} loading ${url}`);
+  return as === 'text' ? r.text() : r.arrayBuffer();
+}
+
+/**
+ * Evaluate a CommonJS/UMD-style script in an isolated function scope so that
+ * several harfbuzzjs versions never fight over globals (`hbjs`, `Module`, ...).
+ * `fallbackName` is a top-level identifier to return if the script did not
+ * assign module.exports.
+ */
+function evalScript(code, fallbackName) {
+  const module = { exports: {} };
+  const fn = new Function('module', 'exports',
+    `${code}\n;return (typeof module.exports === 'function' || Object.keys(module.exports).length)` +
+    ` ? module.exports : (typeof ${fallbackName} !== 'undefined' ? ${fallbackName} : undefined);`);
+  const out = fn(module, module.exports);
+  if (!out) throw new Error('Script did not export a HarfBuzz factory');
+  return out;
+}
+
+/**
+ * Engine = {
+ *   id, kind, hbVersion,                     // identity
+ *   api:      hbjs-style object (createBlob/createFace/createFont/createBuffer) or
+ *             null for esm
+ *   newBlob/newFace/newFont/newBuffer        // uniform constructors
+ *   trace(font, buffer)                      // -> raw trace array
+ * }
+ */
+const engines = new Map();       // harfbuzzjs version -> Engine
+let engine = null;               // active engine
+
+/** Legacy/emcc: hbjs-style API object -> uniform engine. */
+function wrapHbjs(id, kind, hbjsApi, wasmExports) {
+  let hbVersion = null;
+  try { if (hbjsApi.version_string) hbVersion = hbjsApi.version_string(); } catch (_) {}
+  return {
+    id, kind, hbVersion, wasmExports,
+    newBlob:   bytes => hbjsApi.createBlob(bytes),
+    newFace:   blob  => hbjsApi.createFace(blob, 0),
+    newFont:   face  => hbjsApi.createFont(face),
+    newBuffer: ()    => hbjsApi.createBuffer(),
+    refTable:  (face, tag) => face.reference_table(tag),
+    dirLTR: 'ltr', dirRTL: 'rtl',
+    trace: (font, buffer) => hbjsApi.shapeWithTrace(font, buffer, '', 0, 0),
+  };
+}
+
+async function loadLegacy(id) {
+  const [src, wasm] = await Promise.all([
+    fetchChecked(pkgUrl(id, 'hbjs.js'), 'text'),
+    fetchChecked(pkgUrl(id, 'hb.wasm')),
+  ]);
+  const hbjsFactory = evalScript(src, 'hbjs');
+  const { instance } = await WebAssembly.instantiate(wasm);
+  const api = hbjsFactory(instance);
+  const eng = wrapHbjs(id, 'legacy', api, instance.exports);
+  // Native trace export; larger buffer than hbjs.js hardcodes (see TRACE_BUF_SIZE)
+  eng.trace = (font, buffer) => nativeTrace(eng.wasmExports, font, buffer);
+  return eng;
+}
+
+async function loadEmcc(id) {
+  const [hbSrc, hbjsSrc, wasm] = await Promise.all([
+    fetchChecked(pkgUrl(id, 'hb.js'), 'text'),
+    fetchChecked(pkgUrl(id, 'hbjs.js'), 'text'),
+    fetchChecked(pkgUrl(id, 'hb.wasm')),
+  ]);
+  const createHarfBuzz = evalScript(hbSrc, 'Module');
+  const hbjsFactory    = evalScript(hbjsSrc, 'hbjs');
+  const Module = await createHarfBuzz({
+    wasmBinary: wasm,
+    locateFile: f => pkgUrl(id, f),
   });
+  const api = hbjsFactory(Module);
+  return wrapHbjs(id, 'emcc', api, Module.wasmExports);
+}
+
+async function loadEsm(id) {
+  const m = await import(/* webpackIgnore: true */ pkgUrl(id, 'dist/index.mjs'));
+  const LTR = 4, RTL = 5;      // hb_direction_t
+  return {
+    id, kind: 'esm',
+    hbVersion: m.versionString ? m.versionString() : null,
+    wasmExports: null,
+    newBlob:   bytes => new m.Blob(bytes),
+    newFace:   blob  => new m.Face(blob, 0),
+    newFont:   face  => new m.Font(face),
+    newBuffer: ()    => new m.Buffer(),
+    refTable:  (face, tag) => face.referenceTable(tag),
+    dirLTR: LTR, dirRTL: RTL,
+    trace: (font, buffer) => m.shapeWithTrace(font, buffer, [], 0, 0),
+  };
+}
+
+/** Load (or fetch from cache) an engine without activating it. */
+async function getEngine(id) {
+  if (engines.has(id)) return engines.get(id);
+  const kind = engineKind(id);
+  const eng = await (kind === 'legacy' ? loadLegacy(id)
+                   : kind === 'emcc'   ? loadEmcc(id)
+                   :                     loadEsm(id));
+  engines.set(id, eng);
+  return eng;
+}
+
+/** Release a wrapper object if its API has an explicit destroy (esm uses GC). */
+function release(obj) {
+  try { if (obj && typeof obj.destroy === 'function') obj.destroy(); } catch (_) {}
+}
+
+/**
+ * Load a harfbuzzjs build and make it the active engine.
+ * If a font is already loaded it is re-created in the new engine from the
+ * original bytes, so the caller can simply re-shape.
+ * @returns {{ id: string, hbVersion: string|null, font: object|null }}  font = loadFont() result if one was reloaded
+ */
+export async function initHarfBuzz(id = DEFAULT_VERSION) {
+  if (engine && engine.id === id) return { id, hbVersion: engine.hbVersion, font: null };
+
+  const next = await getEngine(id);      // throws before touching current state
+
+  if (currentFont) {
+    release(currentFont.font); release(currentFont.face); release(currentFont.blob);
+    currentFont = null;
+  }
+  engine = next;
+  const font = lastFontBuffer ? loadFont(lastFontBuffer) : null;
+  return { id, hbVersion: engine.hbVersion, font };
+}
+
+export function getEngineInfo() {
+  return engine ? { id: engine.id, kind: engine.kind, hbVersion: engine.hbVersion } : null;
 }
 
 // ── Font state ────────────────────────────────────────────────────────────────
@@ -67,7 +237,7 @@ function stripLocation(loc) {
 function parseDebgTable(face) {
   debgNames = { GSUB: {}, GPOS: {} };
   try {
-    const raw = face.reference_table('Debg');
+    const raw = engine.refTable(face, 'Debg');
     if (!raw || raw.length === 0) return;
     const json = JSON.parse(new TextDecoder().decode(raw));
     const feaLib = json['com.github.fonttools.feaLib'];
@@ -107,7 +277,7 @@ export function lookupDebugName(table, lookupId) {
  */
 function parseFontNames(face) {
   try {
-    const raw = face.reference_table('name');
+    const raw = engine.refTable(face, 'name');
     if (!raw || raw.length < 6) return { fullName: null, version: null };
 
     const view       = new DataView(raw.buffer, raw.byteOffset);
@@ -149,13 +319,16 @@ function parseFontNames(face) {
   }
 }
 
+/** Original font bytes, kept so the font can be re-created when the engine changes. */
+let lastFontBuffer = null;
+
 export function loadFont(arrayBuffer) {
-  if (!hb) throw new Error('HarfBuzz not initialised');
+  if (!engine) throw new Error('HarfBuzz not initialised');
 
   if (currentFont) {
-    currentFont.font.destroy();
-    currentFont.face.destroy();
-    currentFont.blob.destroy();
+    release(currentFont.font);
+    release(currentFont.face);
+    release(currentFont.blob);
     currentFont = null;
   }
 
@@ -163,10 +336,11 @@ export function loadFont(arrayBuffer) {
   glyphPathCache.clear();
   glyphAdvanceCache.clear();
 
+  lastFontBuffer = arrayBuffer;
   const fontData = new Uint8Array(arrayBuffer);
-  const blob = hb.createBlob(fontData);
-  const face = hb.createFace(blob, 0);
-  const font = hb.createFont(face);
+  const blob = engine.newBlob(fontData);
+  const face = engine.newFace(blob);
+  const font = engine.newFont(face);
   font.setScale(1000, 1000);
 
   parseDebgTable(face);
@@ -187,14 +361,14 @@ export function loadFont(arrayBuffer) {
 function parseFontMetrics(face) {
   let unitsPerEm = 1000, ascender = 800, descender = -200;
   try {
-    const head = face.reference_table('head');
+    const head = engine.refTable(face, 'head');
     if (head && head.length >= 20) {
       const v = new DataView(head.buffer, head.byteOffset);
       unitsPerEm = v.getUint16(18);
     }
   } catch (_) {}
   try {
-    const os2 = face.reference_table('OS/2');
+    const os2 = engine.refTable(face, 'OS/2');
     if (os2 && os2.length >= 72) {
       const v = new DataView(os2.buffer, os2.byteOffset);
       ascender  =  v.getInt16(68);
@@ -218,18 +392,18 @@ const glyphAdvanceCache = new Map();   // gid -> advance width in design units
 function buildAdvanceCache(face) {
   glyphAdvanceCache.clear();
   try {
-    const hhea = face.reference_table('hhea');
+    const hhea = engine.refTable(face, 'hhea');
     if (!hhea || hhea.length < 36) return;
     const numberOfHMetrics = new DataView(hhea.buffer, hhea.byteOffset).getUint16(34);
 
-    const hmtx = face.reference_table('hmtx');
+    const hmtx = engine.refTable(face, 'hmtx');
     if (!hmtx) return;
     const hmtxView = new DataView(hmtx.buffer, hmtx.byteOffset);
 
     // Determine total glyph count from maxp
     let numGlyphs = numberOfHMetrics;
     try {
-      const maxp = face.reference_table('maxp');
+      const maxp = engine.refTable(face, 'maxp');
       if (maxp && maxp.length >= 6) numGlyphs = new DataView(maxp.buffer, maxp.byteOffset).getUint16(4);
     } catch (_) {}
 
@@ -295,6 +469,59 @@ export function getGlyphPath(gid) {
 const TRACE_BUF_SIZE = 4 * 1024 * 1024;
 
 /**
+ * Native trace for the legacy (0.3.x) build: calls the hbjs_shape_with_trace
+ * WASM export directly, with a larger buffer than hbjs.js hardcodes (1 MB).
+ */
+function nativeTrace(exp, font, buffer) {
+  const utf8Dec = new TextDecoder('utf8');
+
+  // Allocate trace buffer.
+  // Re-snapshot the memory view AFTER each malloc — if any prior operation
+  // caused memory layout changes, the view must point to the current buffer.
+  const traceBuffer = exp.malloc(TRACE_BUF_SIZE);
+  if (!traceBuffer) {
+    throw new Error(
+      'WASM heap exhausted: could not allocate trace buffer. ' +
+      'The loaded font may be consuming most of the 65 MB WASM heap.'
+    );
+  }
+
+  // Feature string: empty, null-terminated
+  const featPtr = exp.malloc(1);
+  if (!featPtr) {
+    exp.free(traceBuffer);
+    throw new Error('WASM heap exhausted: could not allocate feature string.');
+  }
+  new Uint8Array(exp.memory.buffer)[featPtr] = 0;
+
+  let traceLen;
+  try {
+    traceLen = exp.hbjs_shape_with_trace(
+      font.ptr, buffer.ptr, featPtr,
+      0, 0,                        // stop_at, stop_phase → shape fully
+      traceBuffer, TRACE_BUF_SIZE
+    );
+  } finally {
+    exp.free(featPtr);
+  }
+
+  if (traceLen < 0) {
+    exp.free(traceBuffer);
+    throw new Error(
+      `Trace output exceeded ${TRACE_BUF_SIZE / (1024 * 1024)} MB buffer. ` +
+      'This font/text combination produces an unusually large trace.'
+    );
+  }
+
+  // traceLen includes the null terminator; exclude it for JSON.parse.
+  const json = utf8Dec.decode(
+    new Uint8Array(exp.memory.buffer).subarray(traceBuffer, traceBuffer + traceLen - 1)
+  );
+  exp.free(traceBuffer);
+  return JSON.parse(json);
+}
+
+/**
  * Shape text and return the raw shapeWithTrace array.
  *
  * Segment property resolution order (matches HarfBuzz best-practice):
@@ -309,14 +536,11 @@ const TRACE_BUF_SIZE = 4 * 1024 * 1024;
  * @returns {Array}
  */
 export function shapeWithTrace(text, script, lang, direction) {
-  if (!hb)          throw new Error('HarfBuzz not initialised');
+  if (!engine)      throw new Error('HarfBuzz not initialised');
   if (!currentFont) throw new Error('No font loaded');
 
   const { font } = currentFont;
-  const exp = wasmExports;
-  const utf8Dec = new TextDecoder('utf8');
-
-  const buffer = hb.createBuffer();
+  const buffer = engine.newBuffer();
   try {
     buffer.addText(text);
 
@@ -330,58 +554,13 @@ export function shapeWithTrace(text, script, lang, direction) {
     if (la) buffer.setLanguage(la);
 
     // 3. Override direction if explicitly chosen
-    if (direction === 'ltr') buffer.setDirection('ltr');
-    else if (direction === 'rtl') buffer.setDirection('rtl');
+    if (direction === 'ltr') buffer.setDirection(engine.dirLTR);
+    else if (direction === 'rtl') buffer.setDirection(engine.dirRTL);
 
-    // 4. Allocate trace buffer.
-    //    Re-snapshot heapu8 AFTER each malloc — if any prior operation caused
-    //    memory layout changes, the view must point to the current buffer.
-    const traceBuffer = exp.malloc(TRACE_BUF_SIZE);
-    if (!traceBuffer) {
-      throw new Error(
-        'WASM heap exhausted: could not allocate trace buffer. ' +
-        'The loaded font may be consuming most of the 65 MB WASM heap.'
-      );
-    }
-
-    // Feature string: empty, null-terminated
-    const featPtr = exp.malloc(1);
-    if (!featPtr) {
-      exp.free(traceBuffer);
-      throw new Error('WASM heap exhausted: could not allocate feature string.');
-    }
-    // Fresh view after all mallocs are done
-    new Uint8Array(exp.memory.buffer)[featPtr] = 0;
-
-    let traceLen;
-    try {
-      traceLen = exp.hbjs_shape_with_trace(
-        font.ptr, buffer.ptr, featPtr,
-        0, 0,                        // stop_at, stop_phase → shape fully
-        traceBuffer, TRACE_BUF_SIZE
-      );
-    } finally {
-      exp.free(featPtr);
-    }
-
-    if (traceLen < 0) {
-      exp.free(traceBuffer);
-      throw new Error(
-        `Trace output exceeded ${TRACE_BUF_SIZE / (1024 * 1024)} MB buffer. ` +
-        'This font/text combination produces an unusually large trace.'
-      );
-    }
-
-    // traceLen includes the null terminator; exclude it for JSON.parse.
-    // Re-snapshot the view here too — belt-and-suspenders.
-    const json = utf8Dec.decode(
-      new Uint8Array(exp.memory.buffer).subarray(traceBuffer, traceBuffer + traceLen - 1)
-    );
-    exp.free(traceBuffer);
-
-    return JSON.parse(json);
+    // 4. Shape with the active engine's trace implementation
+    return engine.trace(font, buffer);
   } finally {
-    buffer.destroy();
+    release(buffer);
   }
 }
 
@@ -395,4 +574,3 @@ export function glyphName(gid) {
 }
 
 export function isLoaded() { return currentFont !== null; }
-export function getHb()    { return hb; }

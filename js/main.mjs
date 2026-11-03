@@ -3,7 +3,8 @@
  * Entry point. Wires together UI events, font loading, shaping, and rendering.
  */
 
-import { initHarfBuzz, loadFont, shapeWithTrace, isLoaded, precacheGlyphPaths } from './hb-loader.mjs';
+import { initHarfBuzz, loadFont, shapeWithTrace, isLoaded, precacheGlyphPaths,
+         HB_VERSIONS, DEFAULT_VERSION, getEngineInfo } from './hb-loader.mjs';
 import { parseTrace }  from './trace-parser.mjs';
 import { initRenderer, renderTrace, renderCodepoints, showStatus, clearStatus, showEmpty, setFontMetrics } from './renderer.mjs';
 
@@ -19,6 +20,7 @@ const langInput    = document.getElementById('lang-input');
 const dirGroup     = document.getElementById('direction-group');
 const tableFilter  = document.getElementById('table-filter');
 const versionBadge = document.getElementById('hb-version');
+const versionSel   = document.getElementById('hb-version-select');
 
 function getDirection() {
   const checked = dirGroup.querySelector('input[name="direction"]:checked');
@@ -30,12 +32,78 @@ function getDirection() {
 initRenderer();
 shapeBtn.disabled = true;
 
-initHarfBuzz().then(() => {
-  versionBadge.textContent = 'HarfBuzz 12.3.0';
-  showStatus('HarfBuzz ready — drop a font to begin');
-}).catch(err => {
-  showStatus(`Failed to load HarfBuzz: ${err.message}`, true);
-});
+// ── HarfBuzz engine selection ────────────────────────────────────────────────
+// ?hb=<harfbuzzjs version> picks the build (e.g. ?hb=0.4.15) and is kept in
+// the URL so a particular engine can be shared or bisected via links.
+
+function hbLabel(v) {
+  return `HarfBuzz ${v.hb}  ·  harfbuzzjs ${v.id}`;
+}
+
+function buildVersionSelect(selectedId) {
+  versionSel.textContent = '';
+  const known = HB_VERSIONS.some(v => v.id === selectedId);
+  const list  = known ? HB_VERSIONS : [...HB_VERSIONS, { id: selectedId, hb: '?' }];
+  for (const v of list) {
+    const o = document.createElement('option');
+    o.value = v.id;
+    o.textContent = hbLabel(v);
+    versionSel.appendChild(o);
+  }
+  versionSel.value = selectedId;
+}
+
+function updateBadge() {
+  const info = getEngineInfo();
+  if (!info) { versionBadge.textContent = ''; return; }
+  versionBadge.textContent = info.hbVersion
+    ? `HarfBuzz ${info.hbVersion}`
+    : `harfbuzzjs ${info.id}`;
+  versionBadge.title = `harfbuzzjs ${info.id} (${info.kind} loader)`;
+}
+
+function setUrlVersion(id) {
+  try {
+    const u = new URL(location.href);
+    if (id === DEFAULT_VERSION) u.searchParams.delete('hb');
+    else u.searchParams.set('hb', id);
+    history.replaceState(null, '', u);
+  } catch (_) {}
+}
+
+/** Load a build, re-load the current font into it, re-shape. */
+async function selectEngine(id) {
+  const previous = getEngineInfo()?.id ?? null;
+  versionSel.disabled = true;
+  shapeBtn.disabled = true;
+  showStatus(`Loading harfbuzzjs ${id}…`);
+  try {
+    const { font } = await initHarfBuzz(id);
+    updateBadge();
+    setUrlVersion(id);
+    if (font) setFontMetrics(font.metrics);
+    shapeBtn.disabled = !isLoaded();
+    showStatus(`HarfBuzz ${getEngineInfo().hbVersion ?? ('(harfbuzzjs ' + id + ')')} ready` +
+               (isLoaded() ? '' : ' — drop a font to begin'));
+    const word = wordInput.value.trim();
+    if (word && isLoaded()) runShape(word);
+  } catch (err) {
+    console.error(err);
+    if (previous) versionSel.value = previous;      // previous engine is still active
+    shapeBtn.disabled = !isLoaded();
+    showStatus(`Failed to load harfbuzzjs ${id}: ${err.message}`, true);
+  } finally {
+    versionSel.disabled = false;
+  }
+}
+
+{
+  const requested = new URLSearchParams(location.search).get('hb') || DEFAULT_VERSION;
+  buildVersionSelect(requested);
+  selectEngine(requested);
+}
+
+versionSel.addEventListener('change', () => selectEngine(versionSel.value));
 
 // ── Font drop zone ────────────────────────────────────────────────────────────
 

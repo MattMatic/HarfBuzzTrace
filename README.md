@@ -53,7 +53,7 @@ index.html          — single-page shell
 style.css           — light minimal debug theme
 js/
   main.mjs          — UI wiring, event handlers, shape pipeline
-  hb-loader.mjs     — HarfBuzz WASM init, font lifecycle, glyph names
+  hb-loader.mjs     — selectable HarfBuzz WASM engines, font lifecycle, glyph names
   trace-parser.mjs  — converts raw shapeWithTrace[] → LookupGroup[]
   renderer.mjs      — DOM builder for trace list + hover grid
 serve.mjs           — minimal Node.js static file server
@@ -61,12 +61,22 @@ serve.mjs           — minimal Node.js static file server
 
 ## HarfBuzz version
 
-Uses **harfbuzzjs 0.3.6** (HarfBuzz 12.3.0) loaded from jsDelivr CDN.
-Requires an internet connection on first load (WASM is ~2MB, cached by browser).
+The **Engine** drop-down in the header selects which harfbuzzjs build (and therefore which HarfBuzz version) does the shaping. Switching re-loads the current font into the new engine and re-shapes the current word, so you can step through versions to find where output changes. The badge shows the HarfBuzz version the loaded build reports. The choice is kept in the URL, e.g. `?hb=0.4.15`, so a particular engine can be shared as a link; any published harfbuzzjs version number works there, not only the ones in the list.
+
+Builds are loaded from the jsDelivr CDN on demand (WASM is ~0.4–2 MB, cached by the browser). Use `?cdn=<base-url>` to load from a self-hosted mirror laid out as `<base>/harfbuzzjs@<version>/...`.
+
+| harfbuzzjs | HarfBuzz | Loader |
+|---|---|---|
+| 0.3.6 *(default)* | about 9.0 — this build does not report its version | legacy: native `hbjs_shape_with_trace` export |
+| 0.4.2 – 0.4.15 | 10.0.0 → 12.3.0 | emscripten: trace via `hb_buffer_set_message_func` |
+| 0.10.0 – 0.10.3 | 12.3.2 → 14.0.0 | emscripten |
+| 1.2.0 – 1.6.4 | 14.2.0 → 15.0.0 | ES module, class API |
+
+Where several harfbuzzjs releases share a HarfBuzz version, the latest is listed. harfbuzzjs 0.4.8 is not offered (it fails to initialise). Note that **harfbuzzjs 0.3.6 is not HarfBuzz 12.3.0** — HarfBuzz 12.3.0 is harfbuzzjs 0.4.15.
 
 ## Notes
 
-- The trace feature requires a HarfBuzz build with `HB_DEBUG_SHAPE` enabled — the harfbuzzjs 0.3.6 build includes this.
+- Tracing uses the buffer message callback, which every listed build supports (0.3.6 through a native export, newer builds through `hb_buffer_set_message_func`).
 - Lookups that fire but produce no change (skipped, no glyph matches) are suppressed.
 - Orphaned recursive lookup entries (no closing `recursed to lookup` message) are suppressed silently — this is a known HarfBuzz trace bug.
 - `end table GSUB/GPOS` clears the lookup stack to handle any missed `end lookup` messages.
