@@ -439,24 +439,26 @@ function showSvgPreview(glyphBuffer, activeIndices = new Set()) {
 
 // ── Codepoints ────────────────────────────────────────────────────────────────
 
+export function textToHex(text) {
+  return [...text]
+    .map(ch => ch.codePointAt(0).toString(16).toUpperCase().padStart(4, '0'))
+    .join(' ');
+}
+
+// Hex values may be delimited by any non-hex character; "U+" and "\u" prefixes
+// are silently ignored (u, + and \ are non-hex, so they act as delimiters).
+export function hexToText(hex) {
+  return hex.split(/[^0-9a-fA-F]+/)
+    .filter(v => v.length > 0)
+    .map(v => {
+      const cp = parseInt(v, 16);
+      return cp <= 0x10FFFF ? String.fromCodePoint(cp) : '';
+    })
+    .join('');
+}
+
 export function renderCodepoints(text) {
-  const row  = document.getElementById('codepoints-row');
-  const list = document.getElementById('codepoints-list');
-  list.innerHTML = '';
-
-  if (!text) { row.hidden = true; return; }
-
-  [...text].forEach(ch => {
-    const cp  = ch.codePointAt(0);
-    const hex = cp.toString(16).toUpperCase().padStart(4, '0');
-    const chip = document.createElement('span');
-    chip.className   = 'cp-chip';
-    chip.textContent = hex;
-    chip.title       = ch;
-    list.appendChild(chip);
-  });
-
-  row.hidden = false;
+  document.getElementById('hex-input').value = textToHex(text);
 }
 
 // ── Status / error ────────────────────────────────────────────────────────────

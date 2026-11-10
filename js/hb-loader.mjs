@@ -47,8 +47,8 @@ export const HB_VERSIONS = [
   { id: '1.6.4',  hb: '15.0.0' },
 ];
 
-/** Build used when none is requested (unchanged from previous releases). */
-export const DEFAULT_VERSION = '0.3.6';
+/** Build used when none is requested (HarfBuzz 15.0.0). */
+export const DEFAULT_VERSION = '1.6.4';
 
 /**
  * Base URL of an npm CDN laid out like jsDelivr (`<base>/harfbuzzjs@<ver>/<file>`).

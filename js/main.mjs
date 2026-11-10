@@ -6,7 +6,7 @@
 import { initHarfBuzz, loadFont, shapeWithTrace, isLoaded, precacheGlyphPaths,
          HB_VERSIONS, DEFAULT_VERSION, getEngineInfo } from './hb-loader.mjs';
 import { parseTrace }  from './trace-parser.mjs';
-import { initRenderer, renderTrace, renderCodepoints, showStatus, clearStatus, showEmpty, setFontMetrics } from './renderer.mjs';
+import { initRenderer, renderTrace, renderCodepoints, hexToText, showStatus, clearStatus, showEmpty, setFontMetrics } from './renderer.mjs';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const dropZone     = document.getElementById('font-drop-zone');
@@ -177,6 +177,18 @@ wordInput.addEventListener('keydown', e => {
 // Update codepoints live as user types
 wordInput.addEventListener('input', () => {
   renderCodepoints(wordInput.value);
+});
+
+// Reverse direction: editing the hex field updates the word (hex field itself is left as typed)
+const hexInput = document.getElementById('hex-input');
+hexInput.addEventListener('input', () => {
+  wordInput.value = Array.from(hexToText(hexInput.value)).slice(0, 100).join('');
+});
+hexInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const word = wordInput.value.trim();
+    if (word && isLoaded()) runShape(word);
+  }
 });
 
 // Filter change re-shapes if font+word ready

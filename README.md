@@ -67,10 +67,10 @@ Builds are loaded from the jsDelivr CDN on demand (WASM is ~0.4–2 MB, cached b
 
 | harfbuzzjs | HarfBuzz | Loader |
 |---|---|---|
-| 0.3.6 *(default)* | about 9.0 — this build does not report its version | legacy: native `hbjs_shape_with_trace` export |
+| 0.3.6 | about 9.0 — this build does not report its version | legacy: native `hbjs_shape_with_trace` export |
 | 0.4.2 – 0.4.15 | 10.0.0 → 12.3.0 | emscripten: trace via `hb_buffer_set_message_func` |
 | 0.10.0 – 0.10.3 | 12.3.2 → 14.0.0 | emscripten |
-| 1.2.0 – 1.6.4 | 14.2.0 → 15.0.0 | ES module, class API |
+| 1.2.0 – 1.6.4 *(default: 1.6.4)* | 14.2.0 → 15.0.0 | ES module, class API |
 
 Where several harfbuzzjs releases share a HarfBuzz version, the latest is listed. harfbuzzjs 0.4.8 is not offered (it fails to initialise). Note that **harfbuzzjs 0.3.6 is not HarfBuzz 12.3.0** — HarfBuzz 12.3.0 is harfbuzzjs 0.4.15.
 
