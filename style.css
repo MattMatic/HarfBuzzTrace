@@ -229,16 +229,20 @@ button#shape-btn:disabled { opacity: 0.4; cursor: default; }
   color: var(--text-dim);
 }
 
-.cp-chip {
+#hex-input {
+  flex: 1;
+  min-width: 200px;
   font-family: var(--mono);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 3px;
-  padding: 1px 6px;
+  border-radius: var(--radius);
+  padding: 4px 8px;
   color: var(--text);
-  title: attr(data-char);
+  outline: none;
 }
+
+#hex-input:focus { border-color: var(--accent); }
 
 /* ── Output area ─────────────────────────────────────────────── */
 #output-area {
