@@ -229,20 +229,86 @@ button#shape-btn:disabled { opacity: 0.4; cursor: default; }
   color: var(--text-dim);
 }
 
-#hex-input {
+/* The input sits over a backdrop that mirrors its text, so hovered tokens can be <mark>ed */
+.hex-wrap {
+  position: relative;
   flex: 1;
   min-width: 200px;
-  font-family: var(--mono);
-  font-size: 0.82rem;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
+}
+.hex-wrap:focus-within { border-color: var(--accent); }
+
+#hex-input, .hex-backdrop {
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.4;
   padding: 4px 8px;
+  letter-spacing: normal;
+}
+
+#hex-input {
+  position: relative;
+  z-index: 1;
+  display: block;
+  width: 100%;
+  background: transparent;
+  border: none;
   color: var(--text);
   outline: none;
 }
 
-#hex-input:focus { border-color: var(--accent); }
+.hex-backdrop {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  white-space: pre;
+  color: transparent;
+  pointer-events: none;
+}
+.hex-backdrop mark {
+  background: var(--accent-lo);
+  box-shadow: 0 0 0 1px var(--accent);
+  border-radius: 2px;
+  color: transparent;
+}
+
+/* ── Code point strip ────────────────────────────────────────── */
+.cp-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 0 2px;
+}
+.cp-chip {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 52px;
+  padding: 2px 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: default;
+  line-height: 1.25;
+}
+.cp-idx  { font-family: var(--mono); font-size: 0.66rem; color: var(--text-dim); }
+.cp-char { font-size: 1.25rem; }
+.cp-hex  { font-family: var(--mono); font-size: 0.68rem; color: var(--text-dim); }
+.cp-chip.cp-hl {
+  background: var(--accent-lo);
+  border-color: var(--accent);
+}
+
+/* Trace rows touched / not touched by the hovered code point */
+.trace-entry.cp-dim   { opacity: 0.3; }
+.trace-entry.cp-match { background: var(--accent-lo); }
+
+/* cl column source annotation */
+.hg-table th.hg-src, .hg-table td.hg-src { text-align: left; white-space: nowrap; }
+.hg-table td.hg-src { color: var(--text-dim); font-size: 0.9em; }
+.hg-cl:hover { background: var(--accent-lo); }
 
 /* ── Output area ─────────────────────────────────────────────── */
 #output-area {
