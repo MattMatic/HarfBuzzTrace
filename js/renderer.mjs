@@ -4,6 +4,7 @@
  */
 
 import { glyphName, getGlyphPath, getGlyphAdvance } from './hb-loader.mjs';
+import { cpsForClusters, clusterLabel, highlight, clearHighlight } from './crossref.mjs';
 
 // ── Element cache ─────────────────────────────────────────────────────────────
 let traceList  = null;
@@ -186,17 +187,48 @@ function buildEntryRow(row, dimLabel) {
 
   el.append(idxEl, badge, body);
 
+  // Source code points this row touched (via cluster values)
+  const cps = rowCodePoints(row);
+  el._cps = cps;
+
   el.addEventListener('mouseenter', () => {
     el.classList.add('active-hover');
+    highlight(cps);
     // Derive which buffer indices are "active" (changed/involved) for highlight
     const activeIndices = getActiveIndices(row);
     showRightPanel(row.after || row.before || [], row.before || [], activeIndices);
   });
   el.addEventListener('mouseleave', () => {
     el.classList.remove('active-hover');
+    clearHighlight();
   });
 
   return el;
+}
+
+/**
+ * Cluster values of the glyphs this row acted on, resolved to code point indices.
+ * Cluster boundaries come from the before+after buffers so merges are split finely.
+ */
+function rowCodePoints(row) {
+  const clusters = new Set();
+  const add = (buf, i) => { const g = buf?.[i]; if (g) clusters.add(g.cl ?? 0); };
+
+  if (row.action === 'final') {
+    (row.after ?? []).forEach(g => clusters.add(g?.cl ?? 0));
+  } else if (row.action === 'ligate' || row.action === 'replace' ||
+             row.action === 'multiply' || row.action === 'delete') {
+    const g = row.glyphs[0];
+    if (g) {
+      g.before.forEach(b => add(row.before, b.idx));
+      g.after.forEach(a => add(row.after, a.idx));
+    }
+  } else {
+    row.glyphs.forEach(g => add(row.after, g.idx));
+  }
+
+  const boundaries = [...(row.before ?? []), ...(row.after ?? [])].map(g => g?.cl ?? 0);
+  return cpsForClusters(clusters, boundaries);
 }
 
 // ── GSUB body ─────────────────────────────────────────────────────────────────
@@ -346,7 +378,26 @@ function showHoverGrid(afterBuffer, beforeBuffer, activeIndices = new Set()) {
       td.textContent = v;
       if (changedFlags[ci]) td.classList.add('changed');
       else if (v === 0)     td.classList.add('zero');
+
       tr.appendChild(td);
+
+      // Separate "src" column right after cl: the source code point(s) the cluster covers
+      if (ci === 3) {
+        const cps = cpsForClusters([a.cl ?? 0], afterBuffer.map(g => g?.cl ?? 0));
+        const lbl = clusterLabel(cps);
+        const src = document.createElement('td');
+        src.className   = 'hg-src';
+        src.textContent = lbl.text;
+        src.title       = lbl.title;
+        if (lbl.text) {
+          for (const el of [td, src]) {
+            el.classList.add('hg-cl');
+            el.addEventListener('mouseenter', () => highlight(cps));
+            el.addEventListener('mouseleave', () => clearHighlight());
+          }
+        }
+        tr.appendChild(src);
+      }
     });
 
     tbody.appendChild(tr);

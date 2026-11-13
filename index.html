@@ -56,8 +56,13 @@
 
     <section id="codepoints-row" class="codepoints-row">
       <label class="codepoints-label" for="hex-input">Hex</label>
-      <input type="text" id="hex-input" placeholder="61 62 fba80 …" title="Hex code points, delimited by any non-hex character; U+ and \u are ignored" autocomplete="off" spellcheck="false">
+      <div class="hex-wrap">
+        <div id="hex-backdrop" class="hex-backdrop" aria-hidden="true"></div>
+        <input type="text" id="hex-input" placeholder="61 62 fba80 …" title="Hex code points, delimited by any non-hex character; U+ and \u are ignored" autocomplete="off" spellcheck="false">
+      </div>
     </section>
+
+    <section id="cp-strip" class="cp-strip" aria-label="Source code points (hover to cross-reference with the trace)" hidden></section>
 
     <section id="output-area">
       <div id="trace-container">
@@ -74,6 +79,7 @@
                 <th>glyph</th>
                 <th class="hg-name">name</th>
                 <th>cl</th>
+                <th class="hg-src">src</th>
                 <th>ax</th>
                 <th>ay</th>
                 <th>dx</th>

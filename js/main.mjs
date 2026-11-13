@@ -6,6 +6,7 @@
 import { initHarfBuzz, loadFont, shapeWithTrace, isLoaded, precacheGlyphPaths,
          HB_VERSIONS, DEFAULT_VERSION, getEngineInfo } from './hb-loader.mjs';
 import { parseTrace }  from './trace-parser.mjs';
+import { initCrossRef, setSourceText } from './crossref.mjs';
 import { initRenderer, renderTrace, renderCodepoints, hexToText, showStatus, clearStatus, showEmpty, setFontMetrics } from './renderer.mjs';
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
@@ -30,6 +31,7 @@ function getDirection() {
 // ── Initialise ────────────────────────────────────────────────────────────────
 
 initRenderer();
+initCrossRef();
 shapeBtn.disabled = true;
 
 // ── HarfBuzz engine selection ────────────────────────────────────────────────
@@ -214,6 +216,7 @@ function runShape(word) {
   clearStatus();
 
   try {
+    setSourceText(word);
     const rawTrace = shapeWithTrace(word, scriptInput.value, langInput.value, getDirection());
     const filter   = tableFilter.value;
     const groups   = parseTrace(rawTrace, filter);
